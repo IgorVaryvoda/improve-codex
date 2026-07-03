@@ -1,0 +1,13 @@
+{
+  "name": "improve-codex",
+  "description": "Audit your codebase with the improve skill, then implement every plan with OpenAI Codex executors that are sandboxed, browser-free, and CPU-capped — one isolated git worktree per plan, with your main agent reviewing each diff like a tech lead.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Igor Varyvoda",
+    "url": "https://github.com/igorvaryvoda"
+  },
+  "homepage": "https://github.com/igorvaryvoda/improve-codex",
+  "repository": "https://github.com/igorvaryvoda/improve-codex",
+  "license": "MIT",
+  "keywords": ["audit", "planning", "codex", "agents", "orchestration", "worktree", "executor"]
+}
