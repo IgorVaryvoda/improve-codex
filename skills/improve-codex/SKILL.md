@@ -73,7 +73,9 @@ Per plan, from the main tree:
    The script inlines the plan into the prompt from the main tree (uncommitted
    plans are fine), prepends the executor preamble + resource rules, and runs
    codex with the guard flags in the Hard Rules table. The executor's report
-   lands in the given output file.
+   lands in the given output file. Run the script bare — piping its output
+   (`| tail`, `| grep`) masks the timeout exit code (124) and swallows the
+   stream; monitor progress with `git -C <worktree> status` instead.
 4. Mark the plan IN PROGRESS in `plans/README.md` (you maintain the index —
    executors are told not to).
 
@@ -82,8 +84,20 @@ Per plan, from the main tree:
 Review each finished run like a tech lead. The full procedure and verdict
 table live in the improve skill's reference — read
 `references/closing-the-loop.md` inside the installed improve skill's
-directory, sections "Review" and "Verdict", before the first review. Running verification commands inside
-the worktree is fine — it's disposable; the main tree is not.
+directory, sections "Review" and "Verdict", before the first review. Running
+verification commands inside the worktree is fine — it's disposable; the
+main tree is not.
+
+Then harden the review adversarially: if the host environment has an
+adversarial review skill (in this repo: `sirv-adversarial-review`; elsewhere,
+any available skill whose description covers adversarial or branch review),
+load it and run it read-only against the executor's worktree branch — review
+target is the executor's commits, base is the dispatch HEAD. Executors
+optimize for "plan satisfied"; the adversarial pass attacks what that misses:
+needless abstraction, second sources of truth, weak failure paths, tests that
+mock the thing they claim to prove. Its confirmed findings become REVISE
+feedback verbatim, weighted like a failed done criterion. If no such skill is
+available, your tech-lead pass stands alone.
 
 - **APPROVE** → index row DONE; keep the worktree/branch for the user.
 - **REVISE** → write specific feedback to a file, re-run the runner script
@@ -134,6 +148,8 @@ the worktree, never trusted from the executor's report:
 - [ ] New tests read — they assert real behavior, not trivially-green stubs
 - [ ] Executor NOTES checked for skipped browser verifications and
       undocumented deviations (documented deviations are judged on merit)
+- [ ] Adversarial review skill run against the worktree branch when one is
+      available in the environment; confirmed findings folded into the verdict
 
 Close out with a summary per plan: verdict, diff stat, branch, worktree path,
 and anything notable from NOTES.
