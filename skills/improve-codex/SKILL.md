@@ -10,6 +10,22 @@ self-contained plans under `plans/`) and **`codex exec`** (cheap executor —
 implements one plan per isolated worktree). You are the advisor and the
 reviewer. Codex writes the code; you dispatch and judge it.
 
+## Model roles
+
+Each stage runs on the model whose strengths it needs. Overrides via env vars
+are fine when the user asks; the defaults are the contract:
+
+| Role | Model | Where |
+|---|---|---|
+| Plan author, dispatcher, final judge | You (Claude Fable) | improve skill, plan revisions, all verdicts |
+| Plan scrutineer | `gpt-5.6-sol`, high effort | Phase 2, `run-codex-critic.sh plan`, read-only |
+| Executor | `gpt-5.6-terra` | Phase 4, `run-codex-plan.sh` default `CODEX_MODEL` |
+| Adversarial reviewers | Fable **and** `gpt-5.6-sol` high | Phase 5, two independent passes, both required |
+
+The point of the split: the plan is authored and judged by one mind (yours),
+but attacked twice by a different model family — once before execution while
+fixing it is cheap, once after against the real diff.
+
 Requires the `improve` skill and the `codex` CLI. If the improve skill isn't
 installed (look for `improve/SKILL.md` under `~/.claude/skills/` or the
 project's `.claude/skills/`), install it before Phase 1:
@@ -29,7 +45,10 @@ authenticating it is the user's call.
   plans already in `plans/README.md`.
 - Specific plans (`execute 012 014`) → skip Phase 1; execute only those.
 - Model/effort hints ("with gpt-5.4-mini", "low effort") → set `CODEX_MODEL`
-  / `CODEX_EFFORT` for the runner script.
+  / `CODEX_EFFORT` for the executor runner. Critic passes have their own
+  knobs (`CODEX_CRITIC_MODEL` / `CODEX_CRITIC_EFFORT`, default
+  `gpt-5.6-sol` / `high`) — an executor downgrade does not downgrade the
+  critics unless the user says so.
 
 ## Workflow
 
@@ -42,9 +61,37 @@ selection step is where the user controls how much codex work gets queued.
 
 When it finishes, the contract you inherit is: `plans/NNN-<slug>.md` files
 plus `plans/README.md` with execution order, dependencies, and a status
-column. That index drives everything below.
+column. That index drives everything below. The plans are yours — authored
+by you (Fable) via the improve skill — which is exactly why they need a
+hostile read from a different model before anything executes them.
 
-### Phase 2 — Select and order
+### Phase 2 — Scrutinize plans with sol
+
+Before any plan reaches an executor, run it past the critic. Per plan, from
+the main tree (read-only — safe to run against the user's tree):
+
+```bash
+<this-skill-dir>/scripts/run-codex-critic.sh plan <plan-file> <main-tree> <scratch>/NNN-scrutiny.md
+```
+
+The critic is `gpt-5.6-sol` at high effort with the same browser/MCP guards
+as the executor, in a read-only sandbox. It attacks the plan the way a
+skeptical staff engineer would: assumptions the actual code contradicts,
+ambiguity a literal-minded executor could implement two ways, done criteria
+that can pass while the goal fails, scope errors, missing failure paths.
+
+You judge its report — you are the plan's author and its critiques are input,
+not orders. Fold in what survives your judgment by editing the plan file,
+drop style noise silently, and record dismissed *substantive* points in the
+plan (a short "Scrutiny notes" line is enough) so they're visible at review
+time. A plan whose structural issues forced a real rewrite goes through
+scrutiny once more; two NEEDS REVISION verdicts on the same plan means the
+finding list goes to the user before dispatch, not a third loop.
+
+Skip this phase only if the user explicitly asks for speed over safety;
+say so in the dispatch announcement when you do.
+
+### Phase 3 — Select and order
 
 Read `plans/README.md`. Execution set = plans written this session (or the
 ones the user named), in index order, honoring dependencies: a plan runs only
@@ -52,7 +99,7 @@ after everything in its "Depends on" row is DONE. Announce the set, the
 concurrency, and the executor model before dispatching — this is the user's
 last cheap moment to trim scope.
 
-### Phase 3 — Execute with codex
+### Phase 4 — Execute with codex
 
 Per plan, from the main tree:
 
@@ -61,6 +108,8 @@ Per plan, from the main tree:
    ```bash
    git worktree add -b improve/<NNN>-<slug> <repo-parent>/<repo>-codex-<NNN> HEAD
    ```
+   Record `git rev-parse HEAD` now — it's the `<base-ref>` for Phase 5's
+   sol diff review.
 2. **Dependencies**: a fresh worktree has no `node_modules`/build artifacts.
    Cheapest path is a hardlink clone from the main tree
    (`cp -al <main>/node_modules <worktree>/node_modules`); fall back to the
@@ -72,14 +121,15 @@ Per plan, from the main tree:
    ```
    The script inlines the plan into the prompt from the main tree (uncommitted
    plans are fine), prepends the executor preamble + resource rules, and runs
-   codex with the guard flags in the Hard Rules table. The executor's report
+   codex with the guard flags in the Hard Rules table. The executor model is
+   `gpt-5.6-terra` unless `CODEX_MODEL` overrides it. The executor's report
    lands in the given output file. Run the script bare — piping its output
    (`| tail`, `| grep`) masks the timeout exit code (124) and swallows the
    stream; monitor progress with `git -C <worktree> status` instead.
 4. Mark the plan IN PROGRESS in `plans/README.md` (you maintain the index —
    executors are told not to).
 
-### Phase 4 — Review and verdict
+### Phase 5 — Review and verdict
 
 Review each finished run like a tech lead. The full procedure and verdict
 table live in the improve skill's reference — read
@@ -88,16 +138,30 @@ directory, sections "Review" and "Verdict", before the first review. Running
 verification commands inside the worktree is fine — it's disposable; the
 main tree is not.
 
-Then harden the review adversarially: if the host environment has an
-adversarial review skill (in this repo: `sirv-adversarial-review`; elsewhere,
-any available skill whose description covers adversarial or branch review),
-load it and run it read-only against the executor's worktree branch — review
-target is the executor's commits, base is the dispatch HEAD. Executors
-optimize for "plan satisfied"; the adversarial pass attacks what that misses:
+Then harden the review with two independent adversarial passes — both run,
+neither substitutes for the other:
+
+1. **Fable pass (you).** If the host environment has an adversarial review
+   skill (in this repo: `sirv-adversarial-review`; elsewhere, any available
+   skill whose description covers adversarial or branch review), load it and
+   run it read-only against the executor's worktree branch — review target is
+   the executor's commits, base is the dispatch HEAD. If no such skill
+   exists, do the adversarial pass yourself: attack the diff, don't re-check
+   the plan.
+2. **Sol pass.** Run the critic against the same branch:
+   ```bash
+   <this-skill-dir>/scripts/run-codex-critic.sh diff <base-ref> <worktree> <scratch>/NNN-adversarial.md
+   ```
+   `<base-ref>` is the commit the worktree was branched from (record it at
+   worktree creation). This is `gpt-5.6-sol` at high effort, read-only.
+
+Executors optimize for "plan satisfied"; both passes attack what that misses:
 needless abstraction, second sources of truth, weak failure paths, tests that
-mock the thing they claim to prove. Its confirmed findings become REVISE
-feedback verbatim, weighted like a failed done criterion. If no such skill is
-available, your tech-lead pass stands alone.
+mock the thing they claim to prove. You arbitrate: a finding confirmed by
+either pass (verified by you against the actual diff) becomes REVISE feedback
+verbatim, weighted like a failed done criterion. A finding both passes raise
+independently is near-certainly real. Discard nothing silently — dismissed
+findings get one line of reasoning in your review summary.
 
 - **APPROVE** → index row DONE; keep the worktree/branch for the user.
 - **REVISE** → write specific feedback to a file, re-run the runner script
@@ -117,17 +181,18 @@ whether anything is salvageable.
 - **Never merge, push, or commit to the user's branch.** Approved work stays
   on its worktree branch; integration is the user's decision. Offer
   `git worktree remove` cleanup only after the user has integrated.
-- **At most 2 codex instances at once** (each spawns a full node/tool chain;
-  the point of this skill is not to melt the machine). Raise to 3–4 only if
-  the user asks. Dependent plans wait for their dependency's APPROVE.
-- **Keep every guard layer if you modify the runner script.** The executor
-  must never do heavy CPU work outside the plan — above all, never launch
-  browsers. Enforcement is layered:
+- **At most 2 codex instances at once** — executors and critics both count
+  (each spawns a full node/tool chain; the point of this skill is not to melt
+  the machine). Raise to 3–4 only if the user asks. Dependent plans wait for
+  their dependency's APPROVE.
+- **Keep every guard layer if you modify either runner script.** No codex
+  run — executor or critic — may do heavy CPU work outside its job; above
+  all, never launch browsers. Enforcement is layered:
 
 | Layer | Mechanism | What it stops |
 |---|---|---|
 | Config | `-c 'mcp_servers={}'` + `-c 'plugins={}'` | Browser/chrome plugins and browser-backed MCP servers never load (verified: codex then has no browser-control tools); no npx-spawned MCP processes per run |
-| Sandbox | `-s workspace-write` | Writes confined to the worktree |
+| Sandbox | `-s workspace-write` (executor) / `-s read-only` (critics) | Executor writes confined to the worktree; critics can't write at all |
 | Prompt | RESOURCE RULES block | No playwright/puppeteer/agent-browser, no `playwright install`, no dev servers/storybook/watch mode, no E2E, focused test runs only |
 | Scheduling | `nice -n 10`, ≤2 concurrent, `timeout` (default 1h) | Whatever still runs stays deprioritized, bounded, and can't hang forever |
 
@@ -148,8 +213,10 @@ the worktree, never trusted from the executor's report:
 - [ ] New tests read — they assert real behavior, not trivially-green stubs
 - [ ] Executor NOTES checked for skipped browser verifications and
       undocumented deviations (documented deviations are judged on merit)
-- [ ] Adversarial review skill run against the worktree branch when one is
-      available in the environment; confirmed findings folded into the verdict
+- [ ] Both adversarial passes run against the worktree branch — yours
+      (adversarial skill or your own attack on the diff) and sol's
+      (`run-codex-critic.sh diff`); every confirmed finding folded into the
+      verdict, every dismissed one reasoned about in the summary
 
 Close out with a summary per plan: verdict, diff stat, branch, worktree path,
 and anything notable from NOTES.

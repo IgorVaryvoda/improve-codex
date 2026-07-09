@@ -13,7 +13,8 @@
 #   feedback-file    optional reviewer feedback for a REVISE round
 #
 # Environment overrides:
-#   CODEX_MODEL    model id (default: whatever ~/.codex/config.toml sets)
+#   CODEX_MODEL    model id (default: gpt-5.6-terra — the executor tier;
+#                  scrutiny/review runs use run-codex-critic.sh instead)
 #   CODEX_EFFORT   reasoning effort: low|medium|high|xhigh (default: medium —
 #                  plans are fully specified, so execution rarely needs more)
 #   CODEX_NICE     niceness for the codex process tree (default: 10)
@@ -31,6 +32,7 @@ feedback_file=${4:-}
 [[ -f "$plan_file" ]] || { echo "plan file not found: $plan_file" >&2; exit 2; }
 [[ -d "$worktree/.git" || -f "$worktree/.git" ]] || { echo "not a git worktree: $worktree" >&2; exit 2; }
 
+model=${CODEX_MODEL:-gpt-5.6-terra}
 effort=${CODEX_EFFORT:-medium}
 niceness=${CODEX_NICE:-10}
 timeout_s=${CODEX_TIMEOUT:-3600}
@@ -87,9 +89,6 @@ PREAMBLE
   cat "$plan_file"
 } > "$prompt_file"
 
-model_args=()
-[[ -n "${CODEX_MODEL:-}" ]] && model_args+=(-m "$CODEX_MODEL")
-
 # -c 'mcp_servers={}' and -c 'plugins={}' clear every MCP server and plugin
 # from the user config — including browser/chrome plugins and browser-backed
 # MCP servers. Verified: with these set, codex reports no browser-control
@@ -102,5 +101,5 @@ exec nice -n "$niceness" timeout -k 30 "$timeout_s" codex exec \
   -c "model_reasoning_effort=\"$effort\"" \
   --ephemeral \
   --output-last-message "$out_file" \
-  "${model_args[@]}" \
+  -m "$model" \
   - < "$prompt_file"
