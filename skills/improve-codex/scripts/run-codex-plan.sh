@@ -13,8 +13,7 @@
 #   feedback-file    optional reviewer feedback for a REVISE round
 #
 # Environment overrides:
-#   CODEX_MODEL    model id (default: gpt-5.6-terra — the executor tier;
-#                  scrutiny/review runs use run-codex-critic.sh instead)
+#   CODEX_MODEL    model id (default: gpt-5.6-terra)
 #   CODEX_EFFORT   reasoning effort: low|medium|high|xhigh (default: medium —
 #                  plans are fully specified, so execution rarely needs more)
 #   CODEX_NICE     niceness for the codex process tree (default: 10)
@@ -24,10 +23,15 @@
 #                  don't just retry with a bigger number.
 set -euo pipefail
 
-plan_file=$1
-worktree=$2
-out_file=$3
+plan_file=${1:-}
+worktree=${2:-}
+out_file=${3:-}
 feedback_file=${4:-}
+
+[[ -n "$plan_file" && -n "$worktree" && -n "$out_file" ]] || {
+  echo "usage: $0 <plan-file> <worktree-dir> <last-message-out> [feedback-file]" >&2
+  exit 2
+}
 
 [[ -f "$plan_file" ]] || { echo "plan file not found: $plan_file" >&2; exit 2; }
 [[ -d "$worktree/.git" || -f "$worktree/.git" ]] || { echo "not a git worktree: $worktree" >&2; exit 2; }
@@ -93,13 +97,36 @@ PREAMBLE
 # from the user config — including browser/chrome plugins and browser-backed
 # MCP servers. Verified: with these set, codex reports no browser-control
 # tools. -s workspace-write confines writes to the worktree.
-exec nice -n "$niceness" timeout -k 30 "$timeout_s" codex exec \
+timeout_cmd=()
+if command -v timeout >/dev/null 2>&1; then
+  timeout_cmd=(timeout -k 30 "$timeout_s")
+elif command -v gtimeout >/dev/null 2>&1; then
+  timeout_cmd=(gtimeout -k 30 "$timeout_s")
+else
+  echo "ERROR: no timeout/gtimeout binary; refusing to run without a wall-clock cap" >&2
+  exit 127
+fi
+exec 3<"$prompt_file"
+rm -f "$prompt_file"
+trap - EXIT
+
+exec nice -n "$niceness" "${timeout_cmd[@]}" codex exec \
   -C "$worktree" \
   -s workspace-write \
   -c 'mcp_servers={}' \
   -c 'plugins={}' \
   -c "model_reasoning_effort=\"$effort\"" \
+  --disable apps \
+  --disable enable_mcp_apps \
+  --disable hooks \
+  --disable browser_use \
+  --disable browser_use_external \
+  --disable browser_use_full_cdp_access \
+  --disable in_app_browser \
+  --disable computer_use \
+  --disable multi_agent \
+  --disable multi_agent_v2 \
   --ephemeral \
   --output-last-message "$out_file" \
   -m "$model" \
-  - < "$prompt_file"
+  - <&3

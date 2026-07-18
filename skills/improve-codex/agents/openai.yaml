@@ -1,0 +1,4 @@
+interface:
+  display_name: "Improve with Codex"
+  short_description: "Audit, execute, and adversarially review plans"
+  default_prompt: "Use $improve-codex to audit this codebase, execute the selected plans safely, and review the resulting diffs."
