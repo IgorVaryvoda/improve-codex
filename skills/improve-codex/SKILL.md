@@ -63,10 +63,15 @@ Sol runs at high effort in a read-only sandbox. It attacks assumptions the
 code contradicts, ambiguity, passable-but-insufficient done criteria, scope
 errors, and missing failure paths. Judge its report: incorporate valid
 findings into the plan, silently drop style noise, and record dismissed
-substantive findings in a short scrutiny note. A structural rewrite gets one
-more scrutiny pass; two `NEEDS REVISION` verdicts go to the user, not a third
-critic loop. Skip only on an explicit user request for speed over safety and
-announce that skip before dispatch.
+substantive findings in a short scrutiny note.
+
+Scrutiny is capped at two rounds per plan. A structural rewrite gets one more
+scrutiny pass and no more. If the second round still returns `NEEDS REVISION`
+on substantive grounds, the plan itself is the defect: split it or replace it
+per "Reaching the review cap" below, rather than opening a third scrutiny loop
+or handing the same plan to the user unchanged. Skip scrutiny only on an
+explicit user request for speed over safety, and announce that skip before
+dispatch.
 
 ### Phase 3 — Select and order
 
@@ -211,11 +216,54 @@ actual diff. Confirmed findings become verbatim REVISE feedback; record one
 line of reasoning for every dismissed substantive finding.
 
 - **APPROVE**: mark DONE and retain the integration worktree and branch.
-- **REVISE**: write feedback and rerun the affected batch, at most twice.
+- **REVISE**: write verbatim feedback and rerun the affected batch once.
 - **BLOCK**: mark BLOCKED and refine the plan with what was learned.
 
 A nonzero, timed-out, or reportless executor run is a failed run, not a
-verdict. Inspect its diff before deciding whether it is salvageable.
+verdict. Inspect its diff before deciding whether it is salvageable. A failed
+run does not consume a review round, because nothing was reviewed.
+
+### Reaching the review cap — split or re-approach
+
+Reachable from Phase 2 scrutiny and Phase 5 review alike. A review round is one
+complete review of a plan: in Phase 5, done criteria plus both adversarial
+passes; in Phase 2, one Sol scrutiny pass. **Two rounds per plan is the
+ceiling** — the initial review, and one review of the revision. There is no
+third round, so a second round that still finds major blockers never issues
+REVISE again.
+
+Major blockers are done criteria that will not pass, diffs that keep escaping
+declared scope, a design the code contradicts, or the same finding surviving
+its own fix. Cosmetic residue is not a blocker; take it as REVISE inside the
+cap or as a follow-up plan.
+
+When round two ends on major blockers, stop dispatching that plan. Retain its
+branch and worktree as evidence when execution has already run, mark the plan
+BLOCKED in `plans/README.md`, and treat the plan as the defect rather than the
+executor. Then choose one:
+
+1. **Split.** The approach holds but the plan is too large or too coupled for
+   one executor pass. Carve it into smaller plans, each with its own concrete
+   scope, done criteria, and bounded validation command, ordered by dependency.
+   Any part that already verifies clean and stands alone stays APPROVE on its
+   retained branch, unmerged as always; re-plan only the parts that blocked.
+2. **Nuke and re-approach.** The blockers are the approach — the plan fights
+   the codebase, its premises were wrong, or the diff proved the design
+   unworkable. Retire the plan (BLOCKED, with the reason recorded) and author a
+   replacement that takes a different route, informed by what the two rounds
+   revealed. Discard the failed branch's implementation rather than salvaging
+   it.
+
+Prefer splitting when the blockers are localized; re-approach when they are
+structural. Replacement plans re-enter the flow at Phase 2 with a fresh round
+counter and Sol's own two-round scrutiny cap; they are new plans, not a third
+round on the old one.
+
+Announce the choice, the blockers that forced it, and the resulting plan set.
+Escalate to the user instead of choosing only when the blockers need a decision
+that is not yours to make — a product tradeoff, an external dependency, or a
+constraint the plans cannot resolve. Record that as BLOCKED with the specific
+question.
 
 ## Hard rules
 
@@ -223,6 +271,9 @@ verdict. Inspect its diff before deciding whether it is salvageable.
   Codex session owns plans, dispatch, and review.
 - Never merge, push, or commit to the user's branch. Approved work remains on
   the dedicated integration branch for a separate landing step.
+- Two rounds per plan is a hard ceiling for both plan scrutiny and execution
+  review. A plan still holding major blockers after round two is split or
+  retired; it is never sent through a third round.
 - In the orchestration lane, keep the repo-owned improve profile serialized.
   Dependencies wait for approval and no worker may recursively start agent
   orchestration.
@@ -257,6 +308,10 @@ Before a verdict, independently verify:
 - [ ] Executor notes, browser skips, and deviations are reviewed.
 - [ ] Both adversarial passes run: advisor and Sol diff; confirmed findings
       affect the verdict and dismissed findings are reasoned in the summary.
+- [ ] No plan is on a third review round; any plan that hit the cap with major
+      blockers was split or retired rather than reviewed again.
 
-Summarize verdict, diff stat, execution branch, worktree, tracker state when
-present, and notable notes per plan.
+Summarize verdict, review rounds used, diff stat, execution branch, worktree,
+tracker state when present, and notable notes per plan. When a plan hit the
+review cap, state whether it was split or retired, and name the successor
+plans.

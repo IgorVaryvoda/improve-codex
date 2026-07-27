@@ -51,6 +51,9 @@ settings remain independent.
 5. Re-run done criteria and require both an advisor pass and a Sol diff pass.
 6. Return APPROVE, REVISE, or BLOCK. The skill never merges or pushes approved
    implementation branches.
+7. Cap review at two rounds per plan. A plan that still has major blockers
+   after the second round is split into smaller plans or retired and
+   re-approached — never sent through a third round.
 
 ## Portable runner guardrails
 
