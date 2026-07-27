@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax-check all shell scripts
+        run: |
+          bash -n skills/improve-codex/scripts/run-codex-plan.sh
+          bash -n skills/improve-codex/scripts/run-codex-critic.sh
+          bash -n tests/run-tests.sh
+          bash -n tests/stub-bin/codex
+
+      - name: Lint with shellcheck
+        run: |
+          shellcheck -x \
+            skills/improve-codex/scripts/run-codex-plan.sh \
+            skills/improve-codex/scripts/run-codex-critic.sh \
+            tests/run-tests.sh \
+            tests/stub-bin/codex
+
+      - name: Runner entrypoints stay executable
+        run: |
+          test -x skills/improve-codex/scripts/run-codex-plan.sh
+          test -x skills/improve-codex/scripts/run-codex-critic.sh
+
+      - name: Validate plugin manifests
+        run: |
+          python3 -m json.tool .claude-plugin/plugin.json > /dev/null
+          python3 -m json.tool .claude-plugin/marketplace.json > /dev/null
+
+      - name: Run runner test suite
+        run: tests/run-tests.sh

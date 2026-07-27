@@ -55,6 +55,12 @@ timeout_s=${CODEX_TIMEOUT:-3600}
   exit 2
 }
 [[ "$niceness" =~ ^-?[0-9]+$ ]] || { echo "CODEX_NICE must be an integer: $niceness" >&2; exit 2; }
+# The effort is interpolated into a `-c key="value"` TOML override, so it must
+# stay a plain token — anything with quoting or spaces would rewrite the config.
+[[ "$effort" =~ ^[A-Za-z0-9_-]+$ ]] || {
+  echo "CODEX_EFFORT must be a plain token such as low|medium|high|xhigh: $effort" >&2
+  exit 2
+}
 
 # Check the report destination before spending an hour of executor time on it.
 out_dir=$(dirname "$out_file")
@@ -65,19 +71,24 @@ out_dir=$(dirname "$out_file")
   exit 2
 }
 
-prompt_file=$(mktemp)
-report_tmp=$(mktemp "$out_dir/.improve-codex-report.XXXXXX")
-
+# Install the traps before creating any temp file, so a signal landing between
+# mktemp and trap can never leak one.
+prompt_file=
+report_tmp=
 cleanup() {
   status=$?
   trap - EXIT HUP INT TERM
-  rm -f "$prompt_file" "$report_tmp"
+  [[ -n "$prompt_file" ]] && rm -f "$prompt_file"
+  [[ -n "$report_tmp" ]] && rm -f "$report_tmp"
   exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+prompt_file=$(mktemp)
+report_tmp=$(mktemp "$out_dir/.improve-codex-report.XXXXXX")
 
 {
   cat <<'PREAMBLE'
