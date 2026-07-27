@@ -56,14 +56,18 @@ ordered `plans/README.md` index.
 Before execution, scrutinize each plan from the main tree:
 
 ```bash
-<this-skill-dir>/scripts/run-codex-critic.sh plan <plan-file> <main-tree> <scratch>/NNN-scrutiny.md
+<this-skill-dir>/scripts/run-codex-critic.sh plan <plan-file> <main-tree> <scratch>/NNN-scrutiny-r1.md
 ```
 
 Sol runs at high effort in a read-only sandbox. It attacks assumptions the
 code contradicts, ambiguity, passable-but-insufficient done criteria, scope
-errors, and missing failure paths. Judge its report: incorporate valid
+errors, and missing failure paths. Every finding it returns carries a
+`[BLOCKER]`, `[MAJOR]`, or `[MINOR]` tag, and `NEEDS REVISION` means at least
+one blocker or major finding stands. Judge its report: incorporate valid
 findings into the plan, silently drop style noise, and record dismissed
-substantive findings in a short scrutiny note.
+substantive findings in a short scrutiny note. Report paths are round-suffixed
+and the runners refuse to overwrite one, so round two never destroys round
+one's findings.
 
 Scrutiny is capped at two rounds per plan. A structural rewrite gets one more
 scrutiny pass and no more. If the second round still returns `NEEDS REVISION`
@@ -180,12 +184,16 @@ git worktree add -b improve/<first>-<last>-integration \
   <repo-parent>/<repo>-codex-<first>-<last> HEAD
 git -C <worktree> rev-parse HEAD
 <this-skill-dir>/scripts/run-codex-plan.sh \
-  <first-plan-file> <worktree> <scratch>/<first>-report.md
+  <first-plan-file> <worktree> <scratch>/<first>-report-r1.md
 # Review and APPROVE the dependency before dispatching the next plan.
 git -C <worktree> rev-parse HEAD
 <this-skill-dir>/scripts/run-codex-plan.sh \
-  <dependent-plan-file> <worktree> <scratch>/<dependent>-report.md
+  <dependent-plan-file> <worktree> <scratch>/<dependent>-report-r1.md
 ```
+
+Report paths carry the round number. A REVISE rerun writes `-r2.md` and passes
+the reviewer's feedback file as the fourth argument; the runner refuses to
+overwrite the round-one report.
 
 Keep all runner guard layers. Terra remains the default unless `CODEX_MODEL`
 overrides it, and a nonzero or reportless run remains a failed run. Never
@@ -208,12 +216,14 @@ it does not replace either close-out pass:
    current Codex session attacks the diff itself rather than rechecking plan.
 2. **Sol pass.** Run:
    ```bash
-   <this-skill-dir>/scripts/run-codex-critic.sh diff <base-ref> <execution-worktree> <scratch>/NNN-adversarial.md
+   <this-skill-dir>/scripts/run-codex-critic.sh diff <base-ref> <execution-worktree> <scratch>/NNN-adversarial-r1.md
    ```
 
 Neither pass substitutes for the other. Confirm each finding against the
 actual diff. Confirmed findings become verbatim REVISE feedback; record one
-line of reasoning for every dismissed substantive finding.
+line of reasoning for every dismissed substantive finding. Keep every round's
+report: comparing round one against round two is how a finding that survived
+its own fix becomes visible.
 
 - **APPROVE**: mark DONE and retain the integration worktree and branch.
 - **REVISE**: write verbatim feedback and rerun the affected batch once.
@@ -232,10 +242,14 @@ ceiling** — the initial review, and one review of the revision. There is no
 third round, so a second round that still finds major blockers never issues
 REVISE again.
 
-Major blockers are done criteria that will not pass, diffs that keep escaping
-declared scope, a design the code contradicts, or the same finding surviving
-its own fix. Cosmetic residue is not a blocker; take it as REVISE inside the
-cap or as a follow-up plan.
+Major blockers are confirmed `[BLOCKER]` or `[MAJOR]` findings still standing
+after the round-two review: done criteria that will not pass, diffs that keep
+escaping declared scope, a design the code contradicts, or the same finding
+surviving its own fix. Confirm severity against the actual diff rather than
+trusting the tag, and demote or promote with a recorded reason. `[MINOR]`
+residue is never a blocker; take it as REVISE inside the cap or as a follow-up
+plan. When a critic returns `NEEDS REVISION` with nothing tagged — the runner
+warns on this — assign severity yourself before deciding.
 
 When round two ends on major blockers, stop dispatching that plan. Retain its
 branch and worktree as evidence when execution has already run, mark the plan
@@ -288,8 +302,14 @@ question.
 | Scheduling | `nice -n 10`, timeout or gtimeout, max 2 | Bound and deprioritize work |
 
 Both runners must fail closed with a clear diagnostic when neither `timeout`
-nor `gtimeout` exists. Browser-dependent verification is excluded from an
-executor's job and must be noted for later review.
+nor `gtimeout` exists. They also validate the report destination and the
+environment overrides before spending executor time, refuse to overwrite an
+existing round report, and write the final report only after validating it —
+the executor requires a `STATUS: COMPLETE` or `STATUS: STOPPED` line, the
+critic exactly one nonce-verified verdict. A run that exits zero without a
+usable report is a failed run, so neither leaves a partial report behind.
+Browser-dependent verification is excluded from an executor's job and must be
+noted for later review.
 
 The documented runner paths are executable entrypoints: invoke them directly
 so an accidental loss of execute permission fails fast rather than being
@@ -310,6 +330,8 @@ Before a verdict, independently verify:
       affect the verdict and dismissed findings are reasoned in the summary.
 - [ ] No plan is on a third review round; any plan that hit the cap with major
       blockers was split or retired rather than reviewed again.
+- [ ] Every round's executor and critic report is retained under its own
+      round-suffixed path, and round two was compared against round one.
 
 Summarize verdict, review rounds used, diff stat, execution branch, worktree,
 tracker state when present, and notable notes per plan. When a plan hit the

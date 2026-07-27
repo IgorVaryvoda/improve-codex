@@ -66,8 +66,11 @@ The bundled direct runner and critic:
 - run in workspace-write or read-only sandboxes;
 - prohibit browsers, dev servers, watch mode, Storybook, and E2E suites;
 - run under `nice` and a mandatory `timeout` or `gtimeout`;
-- fail closed when authentication, timeout support, or a nonce-verified critic
-  verdict is missing.
+- validate the report destination and environment overrides before spending
+  executor time, and refuse to overwrite an earlier round's report;
+- fail closed when authentication, timeout support, an executor `STATUS` line,
+  or a nonce-verified critic verdict is missing — a run that exits zero without
+  a usable report is a failed run, and no partial report is left behind.
 
 Browser-dependent verification stays with the main session or user after the
 executor reports it as skipped.
@@ -90,6 +93,13 @@ skills/improve-codex/scripts/run-codex-critic.sh plan \
 skills/improve-codex/scripts/run-codex-critic.sh diff \
   <base-ref> <worktree> <report-out>
 ```
+
+Critic findings are tagged `[BLOCKER]`, `[MAJOR]`, or `[MINOR]`; `NEEDS
+REVISION` means at least one blocker or major finding stands, and surviving
+those in round two is what triggers a split or retirement. Give every round its
+own `<report-out>` path (`NNN-adversarial-r1.md`, then `-r2.md`) — the runners
+refuse to clobber an existing report, because comparing rounds is how a finding
+that survived its own fix is spotted.
 
 Environment overrides:
 
