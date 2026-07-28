@@ -110,6 +110,22 @@ Environment overrides:
 - `CODEX_NICE` (default `10`)
 - `CODEX_TIMEOUT` (default `3600` seconds)
 
+## Development
+
+CI lints every script with shellcheck, checks that the runner entrypoints stay
+executable, validates the plugin manifests, and runs the runner test suite.
+Run it locally with:
+
+```bash
+shellcheck -x skills/improve-codex/scripts/*.sh tests/run-tests.sh tests/stub-bin/codex
+tests/run-tests.sh
+```
+
+The suite drives both runners against a stubbed `codex` CLI
+(`tests/stub-bin/codex`) and asserts the guardrails above: argument and
+override validation, refusal to clobber round reports, fail-closed report and
+nonce-verdict handling, and that a failed run leaves no partial report behind.
+
 ## License
 
 MIT

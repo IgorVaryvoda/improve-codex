@@ -20,10 +20,12 @@ out_file=${4:-}
 [[ -n "$subject" && -n "$tree" && -n "$out_file" ]] || { echo "usage: $0 plan|diff <subject> <tree> <last-message-out>" >&2; exit 2; }
 [[ -d "$tree/.git" || -f "$tree/.git" ]] || { echo "not a git worktree: $tree" >&2; exit 2; }
 
-tree=$(realpath "$tree")
+# Canonicalize with `cd && pwd -P` rather than realpath, which older macOS
+# lacks — the gtimeout fallback below exists for exactly those hosts.
+tree=$(cd "$tree" && pwd -P)
 if [[ "$mode" == "plan" ]]; then
   [[ -f "$subject" ]] || { echo "plan file not found: $subject" >&2; exit 2; }
-  plan_file=$(realpath "$subject")
+  plan_file=$(cd "$(dirname "$subject")" && pwd -P)/$(basename "$subject")
   case "$plan_file" in "$tree"/*) ;; *) echo "plan file must be inside worktree: $plan_file" >&2; exit 2 ;; esac
   plan_relative=${plan_file#"$tree"/}
 else
@@ -39,6 +41,12 @@ timeout_s=${CODEX_TIMEOUT:-3600}
   exit 2
 }
 [[ "$niceness" =~ ^-?[0-9]+$ ]] || { echo "CODEX_NICE must be an integer: $niceness" >&2; exit 2; }
+# The effort is interpolated into a `-c key="value"` TOML override, so it must
+# stay a plain token — anything with quoting or spaces would rewrite the config.
+[[ "$effort" =~ ^[A-Za-z0-9_-]+$ ]] || {
+  echo "CODEX_CRITIC_EFFORT must be a plain token such as low|medium|high|xhigh: $effort" >&2
+  exit 2
+}
 
 out_dir=$(dirname "$out_file")
 [[ -d "$out_dir" ]] || { echo "report directory not found: $out_dir" >&2; exit 2; }
@@ -48,19 +56,24 @@ out_dir=$(dirname "$out_file")
   echo "use a round-suffixed path (…-r2.md) so the earlier round stays reviewable" >&2
   exit 2
 }
-prompt_file=$(mktemp)
-report_tmp=$(mktemp "$out_dir/.improve-codex-critic.XXXXXX")
-
+# Install the traps before creating any temp file, so a signal landing between
+# mktemp and trap can never leak one.
+prompt_file=
+report_tmp=
 cleanup() {
   status=$?
   trap - EXIT HUP INT TERM
-  rm -f "$prompt_file" "$report_tmp"
+  [[ -n "$prompt_file" ]] && rm -f "$prompt_file"
+  [[ -n "$report_tmp" ]] && rm -f "$report_tmp"
   exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+prompt_file=$(mktemp)
+report_tmp=$(mktemp "$out_dir/.improve-codex-critic.XXXXXX")
 
 if command -v uuidgen >/dev/null 2>&1; then
   nonce=$(uuidgen)
@@ -125,6 +138,11 @@ PREAMBLE
   fi
 } > "$prompt_file"
 
+# Hand the prompt over as an open fd and unlink it immediately, so the nonce
+# never lingers on disk if the run is killed — same discipline as the executor.
+exec 3<"$prompt_file"
+rm -f "$prompt_file"
+
 set +e
 nice -n "$niceness" "${timeout_cmd[@]}" codex exec \
   -C "$tree" \
@@ -146,7 +164,7 @@ nice -n "$niceness" "${timeout_cmd[@]}" codex exec \
   --ephemeral \
   --output-last-message "$report_tmp" \
   -m "$model" \
-  - < "$prompt_file"
+  - <&3
 codex_status=$?
 set -e
 if [[ $codex_status -ne 0 ]]; then

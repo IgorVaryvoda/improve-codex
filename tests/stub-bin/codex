@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Test stub for the codex CLI. The runners invoke `codex exec <flags> -` with
+# the prompt on stdin and expect the final report in the file named by
+# --output-last-message. CODEX_STUB_MODE selects the behavior under test, and
+# CODEX_STUB_PROMPT_COPY (optional) receives a copy of the prompt so tests can
+# assert on what the runner actually sent.
+set -euo pipefail
+
+out=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  if [[ "${args[i]}" == "--output-last-message" ]]; then
+    out="${args[i + 1]}"
+  fi
+done
+
+prompt=$(cat)
+if [[ -n "${CODEX_STUB_PROMPT_COPY:-}" ]]; then
+  printf '%s' "$prompt" > "$CODEX_STUB_PROMPT_COPY"
+fi
+
+mode=${CODEX_STUB_MODE:-complete}
+
+if [[ "$mode" == "exit-fail" ]]; then
+  echo "stub: simulated codex failure" >&2
+  exit 3
+fi
+
+[[ -n "$out" ]] || { echo "stub: no --output-last-message given" >&2; exit 64; }
+
+# The critic prompt states its own verdict format, nonce included; harvest it
+# the way a model would read it.
+# Executor prompts have no Verdict line, so tolerate a grep miss.
+nonce=$(printf '%s' "$prompt" | { grep -o 'Verdict\[[^]]*\]' || true; } | head -1 | sed 's/^Verdict\[//; s/\]$//')
+
+case "$mode" in
+  complete)
+    printf 'STATUS: COMPLETE\nSTEPS: 1 done — verification passed\nFILES CHANGED: none\nNOTES: stub run\n' > "$out"
+    ;;
+  stopped)
+    printf 'STATUS: STOPPED\nSTOPPED BECAUSE: stub stop condition\n' > "$out"
+    ;;
+  no-status)
+    printf 'I did some work but forgot the report format.\n' > "$out"
+    ;;
+  echoed-format)
+    printf 'STATUS: COMPLETE | STOPPED\nSTEPS: none\n' > "$out"
+    ;;
+  empty-report)
+    : > "$out"
+    ;;
+  approve)
+    printf '[MINOR] nit only.\n\nVerdict[%s]: APPROVE\n' "$nonce" > "$out"
+    ;;
+  wrong-nonce)
+    printf 'Verdict[not-the-real-nonce]: APPROVE\n' > "$out"
+    ;;
+  hedged-verdict)
+    printf 'Verdict[%s]: APPROVE with reservations\n' "$nonce" > "$out"
+    ;;
+  double-verdict)
+    printf 'Verdict[%s]: APPROVE\nVerdict[%s]: NEEDS REVISION\n' "$nonce" "$nonce" > "$out"
+    ;;
+  revision-untagged)
+    printf 'Something feels off but I tagged nothing.\n\nVerdict[%s]: NEEDS REVISION\n' "$nonce" > "$out"
+    ;;
+  revision-tagged)
+    printf '[BLOCKER] plans/001 done criteria cannot pass as written.\n\nVerdict[%s]: NEEDS REVISION\n' "$nonce" > "$out"
+    ;;
+  *)
+    echo "stub: unknown CODEX_STUB_MODE: $mode" >&2
+    exit 64
+    ;;
+esac
